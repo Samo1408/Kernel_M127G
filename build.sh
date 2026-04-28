@@ -125,6 +125,8 @@ elif [[ "$1" = "dirty" ]]; then
 	else
 		pr_invalid $2
 	fi
+echo "LEX = ${LEX}, YACC = ${YACC}"
+which flex bison
 	make -j`echo $ALLOC_JOB` -C $(pwd) O=$(pwd)/out `echo $DEFAULT_ARGS`
 elif [[ "$1" = "ak3" ]]; then
 	if [ $# -gt 1 ]; then
