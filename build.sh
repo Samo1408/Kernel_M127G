@@ -1,5 +1,4 @@
-#!/usr/bin/env bash
-set -e  # توقف عند أول خطأ
+#! /usr/bin/env bash
 
 #
 # Rissu Kernel Project
@@ -7,101 +6,83 @@ set -e  # توقف عند أول خطأ
 #
 
 # << If unset, you can override if u want
-[ -z "$IS_CI" ] && IS_CI=false
-[ -z "$DO_CLEAN" ] && DO_CLEAN=false
-[ -z "$LTO" ] && LTO=thin
-[ -z "$DEFAULT_KSU_REPO" ] && DEFAULT_KSU_REPO="https://raw.githubusercontent.com/Samo1408/KernelSU/legacy/kernel/setup.sh"
-[ -z "$DEFAULT_KSU_BRANCH" ] && DEFAULT_KSU_BRANCH="legacy"
-[ -z "$DEFAULT_AK3_REPO" ] && DEFAULT_AK3_REPO="https://github.com/rsuntk/AnyKernel3.git"
-[ -z "$DEVICE" ] && DEVICE="M127G"
-[ -z "$IMAGE" ] && IMAGE="$(pwd)/out/arch/arm64/boot/Image"
+[ -z $IS_CI ] && IS_CI=false
+[ -z $DO_CLEAN ] && DO_CLEAN=false
+[ -z $LTO ] && LTO=none
+[ -z $DEFAULT_KSU_REPO ] && DEFAULT_KSU_REPO="https://raw.githubusercontent.com/rsuntk/KernelSU/main/kernel/setup.sh"
+[ -z $DEFAULT_AK3_REPO ] && DEFAULT_AK3_REPO="https://github.com/rsuntk/AnyKernel3.git"
+[ -z $DEVICE ] && DEVICE="m12nsxx"
+[ -z $IMAGE ] && IMAGE="$(pwd)/out/arch/arm64/boot/Image"
 
-if [ -d /samo141988 ]; then
-	export CROSS_COMPILE=/samo141988/toolchains/google/bin/aarch64-linux-android-
- 	export CROSS_COMPILE_COMPAT=/samo141988/toolchains/arm/bin/arm-linux-gnueabi-
-	export CROSS_COMPILE_ARM32=$CROSS_COMPILE_COMPAT
- 	export PATH=/samo141988/toolchains/clang-20/bin:$PATH
+# special rissu's path. linked to his toolchains
+if [ -d /rsuntk ]; then
+	export CROSS_COMPILE=/rsuntk/toolchains/google/bin/aarch64-linux-android-
+	export PATH=/rsuntk/toolchains/clang-12/bin:$PATH
 fi
 
-# color variable
-N='\033[0m'
-R='\033[1;31m'
-G='\033[1;32m'
-
-# start of default args (معدلة: سلسلة واحدة)
-DEFAULT_ARGS="CONFIG_SECTION_MISMATCH_WARN_ONLY=y KCFLAGS=-w ARCH=arm64"
+# start of default args
+DEFAULT_ARGS="
+CONFIG_SECTION_MISMATCH_WARN_ONLY=y
+ARCH=arm64
+"
 export ARCH=arm64
 export CLANG_TRIPLE=aarch64-linux-gnu-
 # end of default args
 
 pr_invalid() {
 	echo -e "[-] Invalid args: $@"
-	exit 1
+	exit
 }
 pr_err() {
 	echo -e "[-] $@"
-	exit 1
+	exit
 }
 pr_info() {
 	echo -e "[+] $@"
 }
-pr_step() {
-	echo "[$1 / $2] $3"
-	sleep 2
-}
 strip() { # fmt: strip <module>
-	llvm-strip "$@" --strip-unneeded
+	llvm-strip $@ --strip-unneeded
 }
 setconfig() { # fmt: setconfig enable/disable <NAME>
-	local config_file
-	if [ -e "$(pwd)/.config" ]; then
-		config_file="$(pwd)/.config"
-	elif [ -e "$(pwd)/out/.config" ]; then
-		config_file="$(pwd)/out/.config"
+	[ -e $(pwd)/.config ] && config_file="$(pwd)/.config" || config_file="$(pwd)/out/.config"
+	if [ -d $(pwd)/scripts ]; then
+		[ "$1" = "enable" ] && pr_info "Enabling CONFIG_`echo $2` .." || pr_info "Disabling CONFIG_`echo $2`"
+		chmod +x ./scripts/config && ./scripts/config --file `echo $config_file` --`echo $1` CONFIG_`echo $2`
 	else
-		pr_err "No .config found! Run defconfig first."
-	fi
-
-	if [ -d "$(pwd)/scripts" ]; then
-		[ "$1" = "enable" ] && pr_info "Enabling CONFIG_$2 .." || pr_info "Disabling CONFIG_$2"
-		chmod +x ./scripts/config
-		./scripts/config --file "$config_file" --"$1" "CONFIG_$2"
-	else
-		pr_err "Folder scripts not found!"
+		echo "! Folder scripts not found!"
+		exit
 	fi
 }
 clone_ak3() {
-	if [ ! -d "$(pwd)/AnyKernel3" ]; then
-		pr_info "Cloning AnyKernel3 repository..."
-		git clone "$DEFAULT_AK3_REPO" --depth=1 || pr_err "Failed to clone AnyKernel3"
-	fi
+	[ ! -d $(pwd)/AnyKernel3 ] && git clone $DEFAULT_AK3_REPO --depth=1
 	rm -rf AnyKernel3/.git
 }
 gen_getutsrelease() {
-	# generate simple c file
-	if [ ! -e utsrelease.c ]; then
-		cat > utsrelease.c <<-EOF
-		/* Generated file by $(basename "$0") */
-		#include <stdio.h>
-		#ifdef __OUT__
-		#include "out/include/generated/utsrelease.h"
-		#else
-		#include "include/generated/utsrelease.h"
-		#endif
+# generate simple c file
+if [ ! -e utsrelease.c ]; then
+echo "/* Generated file by `basename $0` */
+#include <stdio.h>
+#ifdef __OUT__
+#include \"out/include/generated/utsrelease.h\"
+#else
+#include \"include/generated/utsrelease.h\"
+#endif
 
-		char utsrelease[] = UTS_RELEASE;
+char utsrelease[] = UTS_RELEASE;
 
-		int main() {
-			printf("%s\n", utsrelease);
-			return 0;
-		}
-		EOF
-	fi
+int main() {
+	printf(\"%s\n\", utsrelease);
+	return 0;
+}" > utsrelease.c
+fi
 }
 usage() {
-	echo -e "Usage: bash $(basename "$0") <build_target> <-j | --jobs> <(job_count)> <defconfig>"
-	printf "\tbuild_target: dirty, kernel, defconfig, clean\n"
+	echo -e "Usage: bash `basename $0` <build_target> <-j | --jobs> <(job_count)> <defconfig>"
+	printf "\tbuild_target: dirty, kernel, config, clean\n"
 	printf "\t-j or --jobs: <int>\n"
+	
+	[ -d arch/$ARCH/configs ] && printf "\tavailable defconfig: `ls arch/arm64/configs`\n"
+	
 	echo ""
 	printf "NOTE: Run: \texport CROSS_COMPILE=\"<PATH_TO_ANDROID_CC>\"\n"
 	printf "\t\texport PATH=\"<PATH_TO_LLVM>\"\n"
@@ -112,71 +93,51 @@ usage() {
 	printf "\tLTO: Use Link-time Optimization; options: (opt: none, thin, full)\n"
 	printf "\tLLVM: Use all llvm toolchains to build: (opt: 1)\n"
 	printf "\tLLVM_IAS: Use llvm integrated assembler: (opt: 1)\n"
-	exit 1
-}
-
-BUILD_TARGET="$1"
-pr_post_build() {
-	echo ""
-	if [ "$1" = "failed" ]; then
-		echo -e "${R}#### Failed to build some targets ($BUILD_TARGET) ####${N}"
-	else
-		echo -e "${G}#### Build completed at $(date) ####${N}"
-	fi
-	echo ""
-	echo "======================================================="
-	if command -v strings >/dev/null 2>&1; then
-		[ -e "$IMAGE" ] && strings "$IMAGE" | grep "Linux version" || exit
-	else
-		echo "Warning: 'strings' not found, skipping version check."
-	fi
-	echo "======================================================="
+	exit;
 }
 
 # if first arg starts with "clean"
 if [[ "$1" = "clean" ]]; then
 	[ $# -gt 1 ] && pr_err "Excess argument, only need one argument."
 	pr_info "Cleaning dirs"
-	if [ -d "$(pwd)/out" ]; then
+	if [ -d $(pwd)/out ]; then
 		rm -rf out
-	elif [ -f "$(pwd)/.config" ]; then
+	elif [ -f $(pwd)/.config ]; then
 		make clean
 		make mrproper
 	else
 		pr_err "No need clean."
 	fi
-	pr_info "All clean."
-	exit 0
+	pr_err "All clean."
 elif [[ "$1" = "dirty" ]]; then
 	if [ $# -gt 3 ]; then
 		pr_err "Excess argument, only need three argument."
-	fi
-	pr_info "Starting dirty build"
+	fi	
+	pr_err "Starting dirty build"
 	FIRST_JOB="$2"
 	JOB_COUNT="$3"
 	if [ "$FIRST_JOB" = "-j" ] || [ "$FIRST_JOB" = "--jobs" ]; then
-		if [ -z "$JOB_COUNT" ]; then
-			pr_invalid "$3"
+		if [ ! -z $JOB_COUNT ]; then
+			ALLOC_JOB=$JOB_COUNT
+		else
+			pr_invalid $3
 		fi
-		ALLOC_JOB=$JOB_COUNT
 	else
-		pr_invalid "$2"
+		pr_invalid $2
 	fi
-	make -j"$ALLOC_JOB" -C "$(pwd)" O="$(pwd)/out" $DEFAULT_ARGS
-	[ ! -e "$IMAGE" ] && pr_post_build "failed" || pr_post_build "completed"
-	exit 0
+	make -j`echo $ALLOC_JOB` -C $(pwd) O=$(pwd)/out `echo $DEFAULT_ARGS`
 elif [[ "$1" = "ak3" ]]; then
 	if [ $# -gt 1 ]; then
 		pr_err "Excess argument, only need one argument."
 	fi
-	clone_ak3
-	exit 0
+	clone_ak3;
 else
-	[ $# != 4 ] && usage
+	[ $# != 4 ] && usage;
 fi
 
-[ "$KERNELSU" = "true" ] && curl -LSs "$DEFAULT_KSU_REPO" | bash -s "$DEFAULT_KSU_BRANCH" || pr_info "KernelSU is disabled. Add 'KERNELSU=true' or 'export KERNELSU=true' to enable"
+[ "$KERNELSU" = "true" ] && curl -LSs $DEFAULT_KSU_REPO | bash -s main || pr_info "KernelSU is disabled. Add 'KERNELSU=true' or 'export KERNELSU=true' to enable"
 
+BUILD_TARGET="$1"
 FIRST_JOB="$2"
 JOB_COUNT="$3"
 DEFCONFIG="$4"
@@ -186,22 +147,24 @@ if [ "$BUILD_TARGET" = "kernel" ]; then
 elif [ "$BUILD_TARGET" = "defconfig" ]; then
 	BUILD="defconfig"
 else
-	pr_invalid "$1"
+	pr_invalid $1
 fi
 
 if [ "$FIRST_JOB" = "-j" ] || [ "$FIRST_JOB" = "--jobs" ]; then
-	if [ -z "$JOB_COUNT" ]; then
-		pr_invalid "$3"
+	if [ ! -z $JOB_COUNT ]; then
+		ALLOC_JOB=$JOB_COUNT
+	else
+		pr_invalid $3
 	fi
-	ALLOC_JOB=$JOB_COUNT
 else
-	pr_invalid "$2"
+	pr_invalid $2
 fi
 
-if [ -z "$DEFCONFIG" ]; then
-	pr_invalid "$4"
+if [ ! -z "$DEFCONFIG" ]; then
+	BUILD_DEFCONFIG="$DEFCONFIG"
+else
+	pr_invalid $4
 fi
-BUILD_DEFCONFIG="$DEFCONFIG"
 
 if [ "$LLVM" = "1" ]; then
 	LLVM_="true"
@@ -220,75 +183,86 @@ else
 fi
 
 pr_sum() {
-	[ -z "$KBUILD_BUILD_USER" ] && KBUILD_BUILD_USER="$(whoami)"
-	[ -z "$KBUILD_BUILD_HOST" ] && KBUILD_BUILD_HOST="$(uname -n)"
-	pr_step "1" "3" "Starting build with Rissu's build script ..."
+	[ -z $KBUILD_BUILD_USER ] && KBUILD_BUILD_USER="`whoami`"
+	[ -z $KBUILD_BUILD_HOST ] && KBUILD_BUILD_HOST="`hostname`"
+	
 	echo ""
-	echo "======================================================="
-	echo -e "Host Arch: $(uname -m)"
-	echo -e "Host Kernel: $(uname -r)"
-	echo -e "Host GNUMake: $(make -v | grep -e "GNU Make")"
+	echo -e "Host Arch: `uname -m`"
+	echo -e "Host Kernel: `uname -r`"
+	echo -e "Host gnumake: `make -v | grep -e "GNU Make"`"
+	echo ""
+	echo -e "Linux version: `make kernelversion`"
 	echo -e "Kernel builder user: $KBUILD_BUILD_USER"
 	echo -e "Kernel builder host: $KBUILD_BUILD_HOST"
-	printf "\n"
-	echo -e "Linux version: $(make kernelversion)"
-	echo -e "Build date: $(date)"
-	echo -e "Build target: $BUILD"
-	echo -e "Build arch: $ARCH"
-	echo -e "Target Defconfig: $BUILD_DEFCONFIG"
-	echo -e "Allocated core(s): $ALLOC_JOB"
-	printf "\n"
+	echo -e "Build date: `date`"
+	echo -e "Build target: `echo $BUILD`"
+	echo -e "Arch: $ARCH"
+	echo -e "Defconfig: $BUILD_DEFCONFIG"
+	echo -e "Allocated core: $ALLOC_JOB"
+	echo ""
+	echo -e "LLVM: $LLVM_"
+	echo -e "LLVM_IAS: $LLVM_IAS_"
+	echo ""
 	echo -e "LTO: $LTO"
-	echo "======================================================="
+	echo ""
+}
+
+pr_post_build() {
+	echo ""
+	echo -e "## Build $@ at `date` ##"
+	echo ""
+	[ "$@" = "failed" ] && exit
 }
 
 post_build_clean() {
-	if [ -n "$AK3" ] && [ -d "$AK3" ]; then
-		rm -rf "$AK3/Image"
-		rm -rf "$AK3/modules/vendor/lib/modules/"*.ko
-		#sed -i "s/do\.modules=.*/do.modules=0/" "$AK3/anykernel.sh"
-		echo "stub" > "$AK3/modules/vendor/lib/modules/stub"
+	if [ -e $AK3 ]; then
+		rm -rf $AK3/Image
+		rm -rf $AK3/modules/vendor/lib/modules/*.ko
+		#sed -i "s/do\.modules=.*/do.modules=0/" "$(pwd)/AnyKernel3/anykernel.sh"
+		echo "stub" > $AK3/modules/vendor/lib/modules/stub
 	fi
-	rm -f getutsrel utsrelease.c
+	rm getutsrel
+	rm utsrelease.c
+	# clean out folder
 	rm -rf out
 	make clean
 	make mrproper
 }
 
 post_build() {
-	if [ -d "$(pwd)/.git" ]; then
+	if [ -d $(pwd)/.git ]; then
 		GITSHA=$(git rev-parse --short HEAD)
 	else
 		GITSHA="localbuild"
 	fi
-
+	
 	AK3="$(pwd)/AnyKernel3"
 	DATE=$(date +'%Y%m%d%H%M%S')
-	ZIP_FMT="AnyKernel3-$(make kernelversion)-${DEVICE}_$GITSHA-$DATE"
-
-	clone_ak3
-	if [ -d "$AK3" ]; then
+	ZIP_FMT="AnyKernel3-`echo $DEVICE`_$GITSHA-$DATE"
+	
+	clone_ak3;
+	if [ -d $AK3 ]; then
 		echo "- Creating AnyKernel3"
-		gen_getutsrelease
-		if [ -d "$(pwd)/out" ]; then
-			gcc -D__OUT__ -CC utsrelease.c -o getutsrel 2>/dev/null || pr_err "gcc compilation failed"
+		gen_getutsrelease;
+		if [ -d $(pwd)/out ]; then
+			gcc -D__OUT__ -CC utsrelease.c -o getutsrel
 		else
-			gcc -CC utsrelease.c -o getutsrel 2>/dev/null || pr_err "gcc compilation failed"
+			gcc -CC utsrelease.c -o getutsrel
 		fi
 		UTSRELEASE=$(./getutsrel)
-		sed -i "s/kernel\.string=.*/kernel.string=$UTSRELEASE/" "$AK3/anykernel.sh" 2>/dev/null || true
-		sed -i "s/BLOCK=.*/BLOCK=\/dev\/block\/platform\/bootdevice\/by-name\/boot;/" "$AK3/anykernel.sh" 2>/dev/null || true
-		cp "$IMAGE" "$AK3"
-		cd "$AK3"
-		zip -r9 "../$ZIP_FMT.zip" *
+		sed -i "s/kernel\.string=.*/kernel.string=$UTSRELEASE/" "$AK3/anykernel.sh"
+		sed -i "s/BLOCK=.*/BLOCK=\/dev\/block\/platform\/12100000.dwmmc0\/by-name\/boot;/" "$AK3/anykernel.sh"
+		cp $IMAGE $AK3
+		cd $AK3
+		zip -r9 ../`echo $ZIP_FMT`.zip *
 		# CI will clean itself post-build, so we don't need to clean
 		# Also avoiding small AnyKernel3 zip issue!
 		if [ "$IS_CI" != "true" ] && [ "$DO_CLEAN" = "true" ]; then
 			pr_info "Host is not Automated CI, cleaning dirs"
-			post_build_clean
+			post_build_clean;
 		fi
 		cd ..
-		pr_step "3" "3" "Build script ended."
+		pr_err "Build done. Thanks for using this build script :)"
 	fi
 }
 
@@ -309,31 +283,21 @@ handle_lto() {
 		setconfig enable LTO_CLANG
 		setconfig enable ARCH_SUPPORTS_LTO_CLANG
 		setconfig enable ARCH_SUPPORTS_THINLTO
-	else
-		pr_info "LTO not set (none)"
-		# optionally disable LTO completely
-		setconfig enable LTO_NONE
-		setconfig disable LTO
-		setconfig disable THINLTO
-		setconfig disable LTO_CLANG
 	fi
 }
-
 # call summary
 pr_sum
 if [ "$BUILD" = "kernel" ]; then
-	pr_step "2" "3" "Building targets ($BUILD) with lto=$LTO @ $ALLOC_JOB job(s)"
-	make -j"$ALLOC_JOB" -C "$(pwd)" O="$(pwd)/out" $DEFAULT_ARGS "$BUILD_DEFCONFIG"
+	make -j`echo $ALLOC_JOB` -C $(pwd) O=$(pwd)/out `echo $DEFAULT_ARGS` `echo $BUILD_DEFCONFIG`
 	[ "$KERNELSU" = "true" ] && setconfig enable KSU
-	handle_lto
-	make -j"$ALLOC_JOB" -C "$(pwd)" O="$(pwd)/out" $DEFAULT_ARGS
-	if [ -e "$IMAGE" ]; then
+	[ "$LTO" != "none" ] && handle_lto || pr_info "LTO not set";
+	make -j`echo $ALLOC_JOB` -C $(pwd) O=$(pwd)/out `echo $DEFAULT_ARGS`
+	if [ -e $IMAGE ]; then
 		pr_post_build "completed"
 		post_build
 	else
 		pr_post_build "failed"
-		exit 1
 	fi
 elif [ "$BUILD" = "defconfig" ]; then
-	make -j"$ALLOC_JOB" -C "$(pwd)" O="$(pwd)/out" $DEFAULT_ARGS "$BUILD_DEFCONFIG"
+	make -j`echo $ALLOC_JOB` -C $(pwd) O=$(pwd)/out `echo $DEFAULT_ARGS` `echo $BUILD_DEFCONFIG`
 fi
