@@ -15,9 +15,11 @@
 [ -z $IMAGE ] && IMAGE="$(pwd)/out/arch/arm64/boot/Image"
 
 # special rissu's path. linked to his toolchains
-if [ -d /rsuntk ]; then
-	export CROSS_COMPILE=/rsuntk/toolchains/google/bin/aarch64-linux-android-
-	export PATH=/rsuntk/toolchains/clang-12/bin:$PATH
+if [ -d /samo141988 ]; then
+	export CROSS_COMPILE=/samo141988/toolchains/google/bin/aarch64-linux-android-
+ 	export CROSS_COMPILE_COMPAT=/samo141988/toolchains/arm/bin/arm-linux-gnueabi-
+	export CROSS_COMPILE_ARM32=$CROSS_COMPILE_COMPAT
+ 	export PATH=/samo141988/toolchains/clang-20/bin:$PATH
 fi
 
 # start of default args
